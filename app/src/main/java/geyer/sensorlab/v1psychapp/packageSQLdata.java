@@ -93,8 +93,6 @@ public class packageSQLdata extends AsyncTask<Object, Integer, Integer> {
         int event = c.getColumnIndex(BackgroundLoggingSQLCols.BackgroundLoggingSQLColsNames.EVENT);
         int time = c.getColumnIndex(BackgroundLoggingSQLCols.BackgroundLoggingSQLColsNames.TIME);
 
-
-
         PdfPTable table = new PdfPTable(2);
         //attempts to add the columns
         c.moveToLast();
@@ -112,10 +110,14 @@ public class packageSQLdata extends AsyncTask<Object, Integer, Integer> {
                 }
             } catch (Exception e) {
                 Log.e("file construct", "error " + e);
+            }finally{
+                if(!c.isClosed()){
+                    c.close();
+                }
+                if(db.isOpen()){
+                    db.close();
+                }
             }
-
-            c.close();
-            db.close();
 
 
             //add to document

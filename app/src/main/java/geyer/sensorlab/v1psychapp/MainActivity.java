@@ -108,24 +108,24 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 //is the app required to request permission to listen to notifications?
                 false,
                 //is the app required to log previous events
-                false,
-                //is the app required that the app performs a cross sectional analysis?
                 true,
+                //is the app required that the app performs a cross sectional analysis?
+                false,
                 //is the app required to log data prospectively?
                 true,
                 /**
                  * Direction for the usage statics
                  */
                 //is the app required to record usage statistics? Usage statistics documents the duration that an application was employed for a specific period.
-                false,
+                true,
                 //how many days back should the usage statistics start to record the data?
-                0,
+                5,
                 //what size of the bins should be developed for the duration of the apps?
-                0,
+                1,
                 //should usage events be document? These are highly detailed accounts of what the smartphone was used for
-                false,
+                true,
                 //How many days back should the app document usage events? The records for usage events is not held for a long period of time, so it is unlikely that the results will return more than a weeks worth of data.
-                0,
+                7,
                 /*
                 what level of the sophistication will the app engage with?
                 0 - nothing
@@ -196,7 +196,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         //initializing files reference
         File appDocumented = new File(directory + File.separator + Constants.APPS_AND_PERMISSIONS_FILE),
 
-                screenUsage = new File(directory + File.separator + Constants.SCREEN_USAGE_FILE);
+                screenUsage = new File(directory + File.separator + Constants.SCREEN_USAGE_FILE),
+
+                usageStats = new File(directory + File.separator + Constants.PAST_USAGE_FILE),
+
+                usageEvents = new File(directory + File.separator + Constants.PAST_EVENTS_FILE);
 
         //list of files to be uploaded
         ArrayList<Uri> files = new ArrayList<>();
@@ -209,6 +213,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
             if(screenUsage.exists()){
                 files.add(FileProvider.getUriForFile(this, "geyer.sensorlab.v1psychapp.fileprovider", screenUsage));
+            }
+
+            if(usageStats.exists()){
+                files.add(FileProvider.getUriForFile(this, "geyer.sensorlab.v1psychapp.fileprovider", usageStats));
+            }
+
+            if(usageEvents.exists()){
+                files.add(FileProvider.getUriForFile(this, "geyer.sensorlab.v1psychapp.fileprovider", usageEvents));
             }
 
             if(files.size()>0){
@@ -227,6 +239,24 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
 
+
+    /**
+     * States:
+     * 1 - inform user
+     * 2 - request password
+     * 3 - document apps & permissions
+     * 4 - request usage permission
+     * 5 - request notification permission
+     * 6 - All permission provided
+     * 7 - retrospectively log data
+     * 8 - retrospective data generating complete
+     * 9 - start Service
+     * 10 - start NotificationListenerService
+     * 11 - service running
+     *
+     */
+
+
     @RequiresApi(api = Build.VERSION_CODES.KITKAT)
     private void promptAction(int i) {
         Log.i(TAG, "result of detect state: " + i);
@@ -235,6 +265,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             case 1:
                 informUser();
                 break;
+            //request password
             case 2:
                 requestPassword();
                 break;
@@ -242,13 +273,37 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             case 3:
                 docApps.execute(getApplicationContext(), this, dai.returnAppDirectionValue("current"));
                 break;
+            //request the usage permissions
             case 4:
                 prANDcsa.requestPermission(Constants.USAGE_STATISTIC_PERMISSION_REQUEST);
                 break;
-            case 7:
-                Log.i(TAG, "call to start logging background data");
-                startLoggingData();
+            //request the notification permissions
+            case 5:
+                prANDcsa.requestPermission(Constants.NOTIFICATION_LISTENER_PERMISSIONS);
                 break;
+            case 6:
+                Toast.makeText(this, "Error occured", Toast.LENGTH_SHORT).show();
+                break;
+            case 7:
+                //start retrospectively logging data
+                RetrospectivelyLogData retrospect = new RetrospectivelyLogData(this);
+                retrospect.execute(this,
+                        dai.returnAppDirectionValue("numberOfDaysForUsageStats"),
+                        dai.returnAppDirectionValue("intervalOfDaysGenerated"),
+                        dai.returnAppDirectionValue("numberOfDaysForUsageEvents"),
+                        dai.returnAppDirectionValue("useUsageStatistics"),
+                        dai.returnAppDirectionValue("useUsageEvents"));
+                break;
+            case 8:
+                //end of retrospective logging and no prospective logging required
+                break;
+            case 9:
+                Log.i(TAG, "call to start logging background data");
+                startLoggingData(false);
+                break;
+            case 10:
+                Log.i(TAG, "call to start logging background data");
+                startLoggingData(true);
             case 11:
                 informServiceIsRunning();
                 break;
@@ -328,12 +383,20 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             case Constants.USAGE_STATISTIC_PERMISSION_REQUEST:
                 promptAction(dai.detectState());
                 break;
+            case Constants.NOTIFICATION_LISTENER_PERMISSIONS:
+                promptAction(dai.detectState());
+                break;
         }
     }
 
     @RequiresApi(api = Build.VERSION_CODES.KITKAT)
-    private void startLoggingData() {
-        Intent startLogging = new Intent(this, logger.class);
+    private void startLoggingData(Boolean toListenToNotifications) {
+        Intent startLogging;
+        if(!toListenToNotifications){
+             startLogging = new Intent(this, logger.class);
+        }else{
+            startLogging = new Intent(this, notificationLogger.class);
+        }
         Bundle bundle = new Bundle();
         startLogging.addFlags(0);
 
@@ -406,6 +469,26 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 break;
             case 6:
                 //do something
+                break;
+            case 7:
+                Log.i(TAG, "result from retrospective logging data - successfully upload retrospective statistics data but not events");
+                //promptAction(dai.detectState());
+                //successfully upload retrospective statistics data but not events
+                break;
+            case 8:
+                Log.i(TAG, "result from retrospective logging data - successfully upload retrospective events data but not statistics");
+                //promptAction(dai.detectState());
+                //successfully upload retrospective events data but not statistics
+                break;
+            case 9:
+                Log.i(TAG, "result from retrospective logging data - unsuccessfully uploaded retrospective events and statistics");
+                //promptAction(dai.detectState());
+                //unsuccessfully uploaded retrospective events and statistics
+                break;
+            case 10:
+                Log.i(TAG, "result from retrospective logging data - successfully uploaded retrospective events and statistics");
+               // promptAction(dai.detectState());
+                //successfully uploaded retrospective events and statistics
                 break;
         }
     }

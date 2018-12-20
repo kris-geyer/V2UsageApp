@@ -136,11 +136,12 @@ class DirectApplicationInitialization {
      * 4 - request usage permission
      * 5 - request notification permission
      * 6 - All permission provided
-     * 7 - start Service
-     * 8 - start NotificationListenerService
-     * 9 - retrospectively log data
-     * 10 - retrospective data generating complete
+     * 7 - retrospectively log data
+     * 8 - retrospective data generating complete
+     * 9 - start Service
+     * 10 - start NotificationListenerService
      * 11 - service running
+     *
      */
 
      int detectState(){
@@ -153,33 +154,43 @@ class DirectApplicationInitialization {
                     if(appDatabaseExists() || !performCrossSectionalAnalysis){
                         state = detectPermissionsState();
                         if(state == 6){
-                            if(prospectiveLoggingEmployed){
-                                if(requestNotificationPermission){
-                                    state = 8;
-                                    if(serviceIsRunning(notificationLogger.class))
-                                        state = 11;
-                                }else{
-                                    state = 7;
-                                    if(serviceIsRunning(logger.class))
-                                        state = 11;
-                                }
-                            }
-
                             if(retrospectiveLoggingEmployed){
-                                if(fileExists(Constants.PAST_USAGE_FILE)) {
-                                    state = 10;
+                                //change below line to: !fileExists(Constants.PAST_USAGE_FILE
+                                if(true) {
+                                    return 7;
                                 }else{
-                                    state = 9;
+                                     if(prospectiveLoggingEmployed) {
+                                        return returnStateOfService();
+                                     }
+                                }
+                            }else{
+                                if(prospectiveLoggingEmployed) {
+                                    return returnStateOfService();
                                 }
                             }
                         }
-
                     }else{
                         state = 3;
                     }
             }
         }
         return state;
+    }
+
+    private int returnStateOfService() {
+        if(requestNotificationPermission){
+            if(serviceIsRunning(notificationLogger.class)){
+                return 11;
+            }else{
+                return 10;
+            }
+        }else{
+            if(serviceIsRunning(logger.class)){
+                return 11;
+            }else{
+                return 9;
+            }
+        }
     }
 
     private boolean appDatabaseExists() {
@@ -323,6 +334,8 @@ class DirectApplicationInitialization {
         return toRelay;
     }
 
+
+
     public int returnAppDirectionValue(String temporalTarget){
         switch (temporalTarget){
             case "current":
@@ -333,6 +346,24 @@ class DirectApplicationInitialization {
                 Log.i(TAG, "request received for level of prospective analysis");
                 Log.i(TAG, "prospective analysis: " + levelOfProspectiveLogging);
                 return levelOfProspectiveLogging;
+            case "numberOfDaysForUsageStats":
+                return numberOfDaysForUsageStats;
+            case "intervalOfDaysGenerated":
+                return intervalOfDaysGenerated;
+            case "numberOfDaysForUsageEvents":
+                return  numberOfDaysForUsageEvents;
+            case "useUsageStatistics":
+                if(useUsageStatistics){
+                    return 1;
+                }else{
+                    return 0;
+                }
+            case "useUsageEvents":
+                if(useUsageEvents){
+                    return 1;
+                }else{
+                    return 0;
+                }
             default:
                 return 100;
         }

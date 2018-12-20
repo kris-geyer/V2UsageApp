@@ -33,6 +33,28 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class documentApps extends AsyncTask<Object, Integer, Integer> {
 
     private static final String TAG = "D_APPS";
+
+    private Context mContextApps;
+    private SharedPreferences appPrefs, appPrefsToDelete;
+    private SharedPreferences.Editor appEditor;
+    private MainActivity mainActivityContext;
+    private int levelOfAnalysis;
+
+    private PackageManager pm;
+    // you may separate this or combined to caller class.
+
+    documentApps(MainActivity delegate) {
+        this.delegate = (asyncResponse) delegate;
+    }
+
+    private asyncResponse delegate = null;
+
+    /**
+     *Objects:
+     * 1 - context
+     * 2 - shared prefs
+     */
+
     @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN)
     @Override
     protected Integer doInBackground(Object... objects) {
@@ -121,26 +143,6 @@ public class documentApps extends AsyncTask<Object, Integer, Integer> {
         //stop looping
     }
 
-    private Context mContextApps;
-    private SharedPreferences appPrefs, appPrefsToDelete;
-    private SharedPreferences.Editor appEditor;
-    private MainActivity mainActivityContext;
-    private int levelOfAnalysis;
-
-    private PackageManager pm;
-    // you may separate this or combined to caller class.
-
-    documentApps(MainActivity delegate) {
-        this.delegate = (asyncResponse) delegate;
-    }
-
-    private asyncResponse delegate = null;
-
-    /**
-     *Objects:
-     * 1 - context
-     * 2 - shared prefs
-     */
 
     private void initializeObjects(Object[] objects) {
         mContextApps = (Context) objects[0];
@@ -150,12 +152,6 @@ public class documentApps extends AsyncTask<Object, Integer, Integer> {
         levelOfAnalysis = (Integer) objects[2];
         appEditor = appPrefsToDelete.edit();
         appEditor.apply();
-    }
-
-    private boolean fileExists(String file) {
-        String directory = (String.valueOf(mainActivityContext.getFilesDir()) + File.separator);
-        File inspectedFile = new File(directory + File.separator + file);
-        return inspectedFile.exists();
     }
 
     @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN)
