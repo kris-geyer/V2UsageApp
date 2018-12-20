@@ -2,6 +2,7 @@ package geyer.sensorlab.v1psychapp;
 
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -332,21 +333,33 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     @RequiresApi(api = Build.VERSION_CODES.KITKAT)
     private void startLoggingData() {
-        Intent startLogging = new Intent();
+        Intent startLogging = new Intent(this, logger.class);
         Bundle bundle = new Bundle();
-        int includeUsageData = dai.returnAppDirectionValue("prospective");
+        startLogging.addFlags(0);
+
+        int includeUsageData = dai.returnAppDirectionValue("current");
+        bundle.putBoolean("has extras", true);
         //if includeUsageData is equal to 2 or 4 then document that you want usage data
+        Log.i(TAG, "to include usage data: " + includeUsageData);
         if(includeUsageData==1||includeUsageData==3){
+            Log.i(TAG, "usage log: " + true);
             bundle.putBoolean("usage log", true);
         }else{
             bundle.putBoolean("usage log", false);
         }
+
+        Boolean documentChangesInInstalledApps = dai.returnIfAppDocumentingShouldOccur();
+        if(documentChangesInInstalledApps){
+            bundle.putBoolean("document apps", true);
+        }else{
+            bundle.putBoolean("document apps", false);
+        }
         startLogging.putExtras(bundle);
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            startService(new Intent(this, logger.class));
+            startService(startLogging);
         }else{
-            startForegroundService(new Intent(this, logger.class));
+            startForegroundService(startLogging);
             }
         }
 
@@ -379,12 +392,20 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 break;
             //finished packaging screen logging successfully
             case 3:
-                sendEmail();
+                progressBar.setProgress(0);
+                PackageApps pkgApps = new PackageApps(this);
+                pkgApps.execute(this);
                 break;
             //failed to package screen logging data
             case 4:
                 Toast.makeText(this, "Problem uploading screen logging data", Toast.LENGTH_LONG).show();
                 Log.i(TAG, "Problem uploading screen logging data");
+                break;
+            case 5:
+                sendEmail();
+                break;
+            case 6:
+                //do something
                 break;
         }
     }

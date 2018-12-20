@@ -1,5 +1,6 @@
 package geyer.sensorlab.v1psychapp;
 
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -17,6 +18,9 @@ import com.itextpdf.text.PageSize;
 import com.itextpdf.text.pdf.PdfPTable;
 import com.itextpdf.text.pdf.PdfWriter;
 
+import net.sqlcipher.Cursor;
+import net.sqlcipher.database.SQLiteDatabase;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -24,22 +28,101 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class documentApps extends AsyncTask<Object, Integer, Integer> {
+
+    private static final String TAG = "D_APPS";
     @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN)
     @Override
     protected Integer doInBackground(Object... objects) {
         initializeObjects(objects);
-        insertAppsAndPermissions(recordInstalledApps());
-        if(fileExists(Constants.APPS_AND_PERMISSIONS_FILE)){
+        if(false){
+            insertAppsAndPermissions(recordInstalledApps());
+        }else{
+            storeAppRecordsInSQL(recordInstalledApps());
+        }
+
+        SQLiteDatabase db = AppsSQL.getInstance(mContextApps).getReadableDatabase(appPrefs.getString("password", "not to be used"));
+        String selectQuery = "SELECT * FROM " + AppsSQLCols.AppsSQLColsNames.TABLE_NAME;
+        Cursor c = db.rawQuery(selectQuery, null);
+        c.moveToLast();
+        int length = c.getCount();
+        c.close();
+        Log.i(TAG, "table size: " + c.getCount());
+        if(length >0){
             return 1;
         }else{
             return 2;
         }
     }
 
+    private void storeAppRecordsInSQL(HashMap<String, ArrayList> appPermsList) {
+        //initialize the SQL cipher
+        SQLiteDatabase.loadLibs(mContextApps);
+        SQLiteDatabase database = AppsSQL.getInstance(mainActivityContext).getWritableDatabase(appPrefs.getString("password", "not to be used"));
+        //start loop that adds each app name, if it is installed, permission, approved or not, time
+
+        final long time = System.currentTimeMillis();
+        final int numApps = appPermsList.size();
+
+        AtomicInteger progress = new AtomicInteger();
+        for (Map.Entry<String, ArrayList> item : appPermsList.entrySet()) {
+
+
+            ContentValues values = new ContentValues();
+            String app = item.getKey();
+            ArrayList permission= item.getValue();
+
+            //if there are permissions
+            if(permission.size() > 0){
+                for (int i = 0; i < permission.size(); i++){
+                    //do something with the permissions
+
+                    String[] currentPermissionSplit = ((String) permission.get(i)).split("\\$");
+                    Log.i(TAG, "split string: " + currentPermissionSplit[0]);
+                    Log.i(TAG, "split string: " + currentPermissionSplit[1]);
+                    values.put(AppsSQLCols.AppsSQLColsNames.APP, app);
+                    values.put(AppsSQLCols.AppsSQLColsNames.INSTALLED, "installed");
+                    values.put(AppsSQLCols.AppsSQLColsNames.PERMISSION, currentPermissionSplit[0]);
+                    values.put(AppsSQLCols.AppsSQLColsNames.APPROVED, currentPermissionSplit[1]);
+                    values.put(AppsSQLCols.AppsSQLColsNames.TIME, time);
+
+                    database.insert(AppsSQLCols.AppsSQLColsNames.TABLE_NAME, null, values);
+                    Cursor cursor = database.rawQuery("SELECT * FROM '" + AppsSQLCols.AppsSQLColsNames.TABLE_NAME + "';", null);
+
+                    cursor.close();
+                }
+            }else{
+                values.put(AppsSQLCols.AppsSQLColsNames.APP, app);
+                values.put(AppsSQLCols.AppsSQLColsNames.INSTALLED, "installed");
+                values.put(AppsSQLCols.AppsSQLColsNames.PERMISSION, "no permissions");
+                values.put(AppsSQLCols.AppsSQLColsNames.APPROVED, "false");
+                values.put(AppsSQLCols.AppsSQLColsNames.TIME, time);
+
+                database.insert(AppsSQLCols.AppsSQLColsNames.TABLE_NAME, null, values);
+                Cursor cursor = database.rawQuery("SELECT * FROM '" + AppsSQLCols.AppsSQLColsNames.TABLE_NAME + "';", null);
+
+                cursor.close();
+            }
+
+            /**
+             * Experiment with what can be taken out of the loop in from the below four lines of code
+             */
+
+
+            int currentProgress = (progress.incrementAndGet() * 100) / numApps;
+            publishProgress(currentProgress);
+        }
+        database.close();
+
+        Log.d(TAG, "SQL attempted to document apps");
+
+        //stop looping
+    }
+
     private Context mContextApps;
-    private SharedPreferences appPrefs;
+    private SharedPreferences appPrefs, appPrefsToDelete;
     private SharedPreferences.Editor appEditor;
     private MainActivity mainActivityContext;
     private int levelOfAnalysis;
@@ -62,9 +145,10 @@ public class documentApps extends AsyncTask<Object, Integer, Integer> {
     private void initializeObjects(Object[] objects) {
         mContextApps = (Context) objects[0];
         appPrefs = mContextApps.getSharedPreferences("app initialization prefs",Context.MODE_PRIVATE);
+        appPrefsToDelete = mContextApps.getSharedPreferences("app prefs to update", Context.MODE_PRIVATE);
         mainActivityContext = (MainActivity) objects[1];
         levelOfAnalysis = (Integer) objects[2];
-        appEditor = appPrefs.edit();
+        appEditor = appPrefsToDelete.edit();
         appEditor.apply();
     }
 
@@ -93,11 +177,11 @@ public class documentApps extends AsyncTask<Object, Integer, Integer> {
                         String tempPermission = reqPermission[i];
                         int tempPermissionFlag = reqPermissionFlag[i];
                         boolean approved = tempPermissionFlag == 3;
-                        permissions.add("*&^"+tempPermission + " - " + approved);
+                        permissions.add(tempPermission + " $ " + approved);
                     }
                 }
                 Log.i("app", (String) pInfo.applicationInfo.loadLabel(pm));
-                appPermissions.put("!@€"+pInfo.applicationInfo.loadLabel(pm), permissions);
+                appPermissions.put(""+pInfo.applicationInfo.loadLabel(pm), permissions);
             }else{
                 ArrayList<String> permissions = new ArrayList<>();
                 if (reqPermission != null){
@@ -107,7 +191,7 @@ public class documentApps extends AsyncTask<Object, Integer, Integer> {
                     }
                 }
                 Log.i("app", (String) pInfo.applicationInfo.loadLabel(pm));
-                appPermissions.put("!@€"+pInfo.applicationInfo.loadLabel(pm), permissions);
+                appPermissions.put(""+pInfo.applicationInfo.loadLabel(pm), permissions);
             }
         }
         return appPermissions;
@@ -209,8 +293,8 @@ public class documentApps extends AsyncTask<Object, Integer, Integer> {
     }
 
     private void pushAppIntoPrefs(String key) {
-        appEditor.putString("app" + appPrefs.getInt("number of apps", 0), key)
-                .putInt("number of apps",(appPrefs.getInt("number of apps", 0)+1)).apply();
+        appEditor.putString("app" + appPrefsToDelete.getInt("number of apps", 0), key)
+                .putInt("number of apps",(appPrefsToDelete.getInt("number of apps", 0)+1)).apply();
     }
 
     @Override

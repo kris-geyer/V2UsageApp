@@ -11,6 +11,9 @@ import android.provider.Settings;
 import android.support.annotation.RequiresApi;
 import android.util.Log;
 
+import net.sqlcipher.Cursor;
+import net.sqlcipher.database.SQLiteDatabase;
+
 import org.spongycastle.util.Pack;
 
 import java.io.File;
@@ -147,7 +150,7 @@ class DirectApplicationInitialization {
             state = 2;
             if(sharedPreferences.getBoolean("password generated", false) || !passwordRequired){
 
-                    if(fileExists(Constants.APPS_AND_PERMISSIONS_FILE) || !performCrossSectionalAnalysis){
+                    if(appDatabaseExists() || !performCrossSectionalAnalysis){
                         state = detectPermissionsState();
                         if(state == 6){
                             if(prospectiveLoggingEmployed){
@@ -177,6 +180,18 @@ class DirectApplicationInitialization {
             }
         }
         return state;
+    }
+
+    private boolean appDatabaseExists() {
+        SQLiteDatabase db = AppsSQL.getInstance(mainActivityContext).getReadableDatabase(sharedPreferences.getString("password", "not to be used"));
+        String selectQuery = "SELECT * FROM " + AppsSQLCols.AppsSQLColsNames.TABLE_NAME;
+        Cursor c = db.rawQuery(selectQuery, null);
+        c.moveToLast();
+        Log.i(TAG, "table size: " + c.getCount());
+        int length = c.getCount();
+        c.close();
+        if(db.isOpen()) {db.close();}
+        return length > 0;
     }
 
     private boolean fileExists(String file) {
@@ -311,11 +326,19 @@ class DirectApplicationInitialization {
     public int returnAppDirectionValue(String temporalTarget){
         switch (temporalTarget){
             case "current":
+                Log.i(TAG, "request received for level of cross sectional analysis");
+                Log.i(TAG, "cross sectional analysis: " + levelOfCrossSectionalAnalysis);
                 return levelOfCrossSectionalAnalysis;
             case "prospective":
+                Log.i(TAG, "request received for level of prospective analysis");
+                Log.i(TAG, "prospective analysis: " + levelOfProspectiveLogging);
                 return levelOfProspectiveLogging;
             default:
                 return 100;
         }
+    }
+
+    public Boolean returnIfAppDocumentingShouldOccur() {
+        return performCrossSectionalAnalysis;
     }
 }

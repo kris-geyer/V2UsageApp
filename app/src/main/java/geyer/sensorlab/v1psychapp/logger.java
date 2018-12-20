@@ -14,6 +14,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Build;
@@ -21,6 +23,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.support.annotation.Nullable;
+import android.support.annotation.RequiresApi;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
@@ -28,6 +31,13 @@ import android.util.Log;
 import net.sqlcipher.Cursor;
 import net.sqlcipher.database.SQLiteDatabase;
 
+import java.lang.reflect.Array;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 public class logger extends Service {
@@ -37,8 +47,9 @@ public class logger extends Service {
         return null;
     }
 
+    private static final String TAG = "LOGGER";
 
-    BroadcastReceiver screenReceiver;
+    BroadcastReceiver screenReceiver, appReceiver;
     SharedPreferences prefs;
     SharedPreferences.Editor editor;
 
@@ -58,21 +69,327 @@ public class logger extends Service {
         initializeSharedPreferences();
         initializeHandler();
 
-        //retrieve data from bundle
-        Bundle bundle = intent.getExtras();
-        if(bundle != null){
-            if(bundle.getBoolean("usage log")){
-                Log.i("Bundle", "true");
-                initializeBroadcastReceiversWithUsageCapabilities();
+        if(flags == 0){
+            //retrieve data from bundle
+            if (intent.hasExtra("has extras")){
+                Bundle bundle = intent.getExtras();
+                if(bundle != null){
+                    Log.i(TAG, "bundle extra (usage log): " + bundle.getBoolean("usage log"));
+                    if(bundle.getBoolean("usage log")){
+
+                        Log.i("Bundle", "true");
+                        initializeBroadcastReceivers();
+                    }else{
+                        Log.i("Bundle", "false");
+                        initializeBroadcastReceiversWithoutUsageCapabilities();
+                    }
+                    if(bundle.getBoolean("document apps")){
+                        Log.i(TAG, "bundle included a request to initialize the apps");
+                        initializeAppBroadcastReceiver();
+                    }else{
+                        Log.i(TAG, "bundle did not include a request to initialize the apps");
+                    }
+
+
+                }else{
+                    Log.i(TAG, "bundle was null");
+                    initializeBroadcastReceiversWithoutUsageCapabilities();
+                }
             }else{
-                Log.i("Bundle", "false");
-                initializeBroadcastReceivers();
+                initializeBroadcastReceiversWithoutUsageCapabilities();
             }
-        }else{
-            initializeBroadcastReceivers();
         }
 
         return START_STICKY;
+    }
+
+    private void initializeAppBroadcastReceiver(){
+
+            appReceiver = new BroadcastReceiver() {
+                @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN)
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if(intent.getAction() != null){
+                        switch (intent.getAction()){
+                            case Intent.ACTION_PACKAGE_ADDED:
+                                generateListOfNewApps(returnListsOfNovelAppsFromSQL(context), context);
+                                //ensureCanBeEnteredIntoDatabase(updateRecordOfApps() + " added");
+                                break;
+                            case Intent.ACTION_PACKAGE_REMOVED:
+                                generateListOfNewApps(returnListsOfNovelAppsFromSQL(context), context);
+                                //ensureCanBeEnteredIntoDatabase(updateRecordOfApps() + " removed");
+
+                        }
+                    }
+                }
+
+                private HashMap<String, Boolean> returnListsOfNovelAppsFromSQL(Context context) {
+                    String selectQuery = "SELECT * FROM " + AppsSQLCols.AppsSQLColsNames.TABLE_NAME;
+                    SQLiteDatabase db = AppsSQL.getInstance(context).getReadableDatabase(prefs.getString("password", "not to be used"));
+
+                    Cursor c = db.rawQuery(selectQuery, null);
+
+                    int appsInt = c.getColumnIndex(AppsSQLCols.AppsSQLColsNames.APP);
+                    int installedInt = c.getColumnIndex(AppsSQLCols.AppsSQLColsNames.INSTALLED);
+                    HashMap<String, Boolean> appList = new HashMap<>();
+
+                    c.moveToLast();
+                    int rowLength = c.getCount();
+                    if (rowLength > 0) {
+                        try {
+                            String lastReadApp = "";
+                            for (c.moveToFirst(); !c.isAfterLast(); c.moveToNext()) {
+                                if(!lastReadApp.equals(c.getString(appsInt))){
+                                    if(c.getString(installedInt).equals("installed")){
+                                        String newApp = c.getString(appsInt);
+                                        appList.put(newApp, true);
+                                        Log.i(TAG, "app: " + newApp);
+                                    }else{
+                                        Log.i(TAG,c.getString(installedInt));
+                                        String newApp = c.getString(appsInt);
+                                        appList.put(newApp, false);
+                                        Log.i(TAG, "app: " + newApp);
+                                    }
+                                }
+
+                            }
+                        } catch (Exception e) {
+                            Log.e("file construct", "error " + e);
+                        }
+                        c.close();
+                    }
+                    return appList;
+                }
+
+                @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN)
+                private void generateListOfNewApps(HashMap<String, Boolean> appsHashmap, Context context) {
+
+                    PackageManager pm = context.getPackageManager();
+                    final List<PackageInfo> appInstall= pm.getInstalledPackages(PackageManager.GET_PERMISSIONS|PackageManager.GET_RECEIVERS|
+                            PackageManager.GET_SERVICES|PackageManager.GET_PROVIDERS);
+
+                    List<String> newApps = new ArrayList<>();
+                    for (PackageInfo packageInfo:appInstall){
+                        newApps.add((String) packageInfo.applicationInfo.loadLabel(pm));
+                    }
+
+                    String appOfInterest;
+                    ArrayList <String> toAddToSQL = new ArrayList<>();
+
+                    ArrayList<String> apps = new ArrayList<>();
+
+
+                    //identify apps still installed
+                    //go through the hashmap and see what the final result was, true or not.
+                    //put this into a List referred to as apps.
+
+                    Iterator it = appsHashmap.entrySet().iterator();
+                    while (it.hasNext()) {
+                        Map.Entry pair = (Map.Entry)it.next();
+                        if((Boolean) pair.getValue()){
+                            apps.add((String) pair.getKey());
+                        }else if(apps.contains(pair.getKey())){
+                            apps.remove(pair.getKey());
+                        }
+                        Log.i(TAG,pair.getKey() + " = " + pair.getValue());
+                        it.remove(); // avoids a ConcurrentModificationException
+                    }
+                    Boolean added;
+                    if(apps.size() > newApps.size()){
+                        added = false;
+                        apps.removeAll(newApps);
+                        if(apps.size() == 1){
+                            appOfInterest = apps.get(0);
+
+                        }else{
+                            appOfInterest  = "problem";
+                        }
+
+                    }else{
+                        added = true;
+                        newApps.removeAll(apps);
+                        if(newApps.size() == 1){
+                            appOfInterest = newApps.get(0);
+
+                        }else{
+                            appOfInterest = "problem";
+                        }
+                    }
+
+                    Log.i(TAG, "new app: + " + appOfInterest);
+
+                    for (PackageInfo packageInfo: appInstall) {
+                        if (packageInfo.applicationInfo.loadLabel(pm).equals(appOfInterest)) {
+                            for (int i = 0; i < packageInfo.requestedPermissions.length; i++) {
+
+                                String[] reqPermission = packageInfo.requestedPermissions;
+                                int[] reqPermissionFlag = packageInfo.requestedPermissionsFlags;
+                                String tempPermission = reqPermission[i];
+                                int tempPermissionFlag = reqPermissionFlag[i];
+                                boolean approved = tempPermissionFlag == 3;
+                                toAddToSQL.add(tempPermission + " $ " + approved);
+                            }
+                        }
+                    }
+
+
+
+                    storeAppRecordsInSQL(toAddToSQL, appOfInterest, context,added );
+                }
+
+
+                private void storeAppRecordsInSQL(ArrayList<String> appPermsList, String appName, Context context, Boolean added) {
+                    //initialize the SQL cipher
+                    SQLiteDatabase.loadLibs(context);
+                    SQLiteDatabase database = AppsSQL.getInstance(context).getWritableDatabase(prefs.getString("password", "not to be used"));
+                    //start loop that adds each app name, if it is installed, permission, approved or not, time
+
+                    final long time = System.currentTimeMillis();
+                    final int permsSize = appPermsList.size();
+
+                    ContentValues values = new ContentValues();
+                    if(permsSize==0) {
+                        values.put(AppsSQLCols.AppsSQLColsNames.APP, appName);
+                        if(added){
+                            values.put(AppsSQLCols.AppsSQLColsNames.INSTALLED, "installed"); }
+                            else{
+                            values.put(AppsSQLCols.AppsSQLColsNames.INSTALLED, "uninstalled");
+                        }
+                        values.put(AppsSQLCols.AppsSQLColsNames.PERMISSION, "no permissions");
+                        values.put(AppsSQLCols.AppsSQLColsNames.APPROVED, "false");
+                        values.put(AppsSQLCols.AppsSQLColsNames.TIME, time);
+
+                        database.insert(AppsSQLCols.AppsSQLColsNames.TABLE_NAME, null, values);
+                        Cursor cursor = database.rawQuery("SELECT * FROM '" + AppsSQLCols.AppsSQLColsNames.TABLE_NAME + "';", null);
+
+                        cursor.close();
+                    }else {
+
+
+                        for (int i = 0; i < appPermsList.size(); i++) {
+                            String[] currentPermissionSplit = ((String) appPermsList.get(i)).split("\\$");
+                            Log.i(TAG, "split string: " + currentPermissionSplit[0]);
+                            Log.i(TAG, "split string: " + currentPermissionSplit[1]);
+                            values.put(AppsSQLCols.AppsSQLColsNames.APP, appName);
+                            if(added){
+                                values.put(AppsSQLCols.AppsSQLColsNames.INSTALLED, "installed"); }
+                            else{
+                                values.put(AppsSQLCols.AppsSQLColsNames.INSTALLED, "uninstalled");
+                            }
+                            values.put(AppsSQLCols.AppsSQLColsNames.PERMISSION, currentPermissionSplit[0]);
+                            values.put(AppsSQLCols.AppsSQLColsNames.APPROVED, currentPermissionSplit[1]);
+                            values.put(AppsSQLCols.AppsSQLColsNames.TIME, time);
+
+                            database.insert(AppsSQLCols.AppsSQLColsNames.TABLE_NAME, null, values);
+                            Cursor cursor = database.rawQuery("SELECT * FROM '" + AppsSQLCols.AppsSQLColsNames.TABLE_NAME + "';", null);
+
+                            cursor.close();
+
+                        }
+                    }
+
+
+                    database.close();
+
+                    Log.d(TAG, "SQL attempted to document apps");
+
+
+                    //stop looping
+                }
+
+
+
+                private void ensureCanBeEnteredIntoDatabase(String toAdd) {
+                    if(toAdd.contains("[")){
+                        toAdd = toAdd.replace("[", "");
+                        toAdd = toAdd.replace("]", "");
+                        Log.i(TAG, "toAdd = " + toAdd );
+                        storeData(toAdd);
+                    }else{
+                        storeData(toAdd);
+                    }
+                }
+
+                private String updateRecordOfApps() {
+                    SharedPreferences appPrefs = getSharedPreferences("app prefs to update", MODE_PRIVATE);
+                    SharedPreferences.Editor appEditor = appPrefs.edit();
+                    Collection<String> oldApps = new ArrayList<>();
+                    for (int i = 0; i <appPrefs.getInt("number of apps", 0); i++){
+                        oldApps.add(appPrefs.getString("app"+i, "notapp"));
+                    }
+
+                    Collection<String> newApps = returnNewAppList();
+
+                    Log.d("oldApps", String.valueOf(oldApps));
+                    Log.d("newApps", String.valueOf(newApps));
+
+                    if(oldApps.size() > newApps.size()){
+                        oldApps.removeAll(newApps);
+                        Log.i("oldApps", "after removal: " + oldApps);
+                        if(oldApps.size() == 1){
+                            appEditor.clear().apply();
+                            appEditor.putString("app" + appPrefs.getInt("number of apps", 0), ((ArrayList<String>) oldApps).get(0))
+                                    .putInt("number of apps",(appPrefs.getInt("number of apps", 0)+1))
+                                    .apply();
+                            for(int i = 0; i < newApps.size();i++){
+                                appEditor.putString("app" + appPrefs.getInt("number of apps", 0), ((ArrayList<String>) newApps).get(i))
+                                        .putInt("number of apps",(appPrefs.getInt("number of apps", 0)+1))
+                                        .apply();
+                            }
+                            return String.valueOf(((ArrayList) oldApps).get(0));
+                        }else{
+                            Log.e("app error", "issue when old apps bigger in size");
+                            for(int i = 0; i < oldApps.size();i++){
+                                Log.e("app", String.valueOf(((ArrayList) oldApps).get(i)));
+                            }
+                            return"PROBLEM!!!";
+                        }
+                    }else{
+                        newApps.removeAll(oldApps);
+                        Log.i("newApps", "after removal: " + newApps);
+                        if(newApps.size() == 1){
+                            appEditor.clear().apply();
+                            appEditor.putString("app" + appPrefs.getInt("number of apps", 0), ((ArrayList<String>) newApps).get(0))
+                                    .putInt("number of apps",(appPrefs.getInt("number of apps", 0)+1))
+                                    .apply();
+                            for(int i = 0; i < oldApps.size();i++){
+                                appEditor.putString("app" + appPrefs.getInt("number of apps", 0), ((ArrayList<String>) oldApps).get(i))
+                                        .putInt("number of apps",(appPrefs.getInt("number of apps", 0)+1))
+                                        .apply();
+                            }
+
+                            return String.valueOf(((ArrayList) newApps).get(0));
+                        }else{
+                            Log.e("app error", "issue when old apps bigger in size");
+                            for(int i = 0; i < newApps.size();i++){
+                                Log.e("app", String.valueOf(((ArrayList) newApps).get(i)));
+                            }
+                            return"PROBLEM!!!";
+                        }
+                    }
+                }
+
+                private ArrayList<String> returnNewAppList() {
+                    ArrayList<String> currentApps = new ArrayList<>();
+                    PackageManager pm = getApplicationContext().getPackageManager();
+                    final List<PackageInfo> appInstall= pm.getInstalledPackages(PackageManager.GET_PERMISSIONS|PackageManager.GET_RECEIVERS|
+                            PackageManager.GET_SERVICES| PackageManager.GET_PROVIDERS);
+
+                    for(PackageInfo pInfo:appInstall) {
+                        currentApps.add(pInfo.applicationInfo.loadLabel(pm).toString());
+                    }
+                    return currentApps;
+                }
+            };
+
+            Log.i(TAG, "initialization of app receiver called");
+            IntentFilter appReceiverFilter = new IntentFilter();
+            appReceiverFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
+            appReceiverFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+            appReceiverFilter.addDataScheme("package");
+
+            registerReceiver(appReceiver, appReceiverFilter);
+
     }
 
     private void initializeSharedPreferences() {
@@ -172,7 +489,7 @@ public class logger extends Service {
                             break;
                         case Intent.ACTION_SCREEN_ON:
                             storeData("screen on");
-                            handler.postDelayed(documentForegroundTask, 1000);
+                            handler.postDelayed(documentForegroundTask, 100);
                             break;
                         case Intent.ACTION_USER_PRESENT:
                             storeData("user present");
@@ -225,7 +542,7 @@ public class logger extends Service {
 
     }
 
-    private void initializeBroadcastReceiversWithUsageCapabilities() {
+    private void initializeBroadcastReceiversWithoutUsageCapabilities() {
         screenReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -254,6 +571,7 @@ public class logger extends Service {
     }
 
     private void storeData(String event) {
+
         SQLiteDatabase database = BackgroundLoggingSQL.getInstance(this).getWritableDatabase(prefs.getString("password", "not to be used"));
 
         final long time = System.currentTimeMillis();
@@ -292,6 +610,7 @@ public class logger extends Service {
     public void onDestroy() {
         super.onDestroy();
         unregisterReceiver(screenReceiver);
+        unregisterReceiver(appReceiver);
     }
 }
 

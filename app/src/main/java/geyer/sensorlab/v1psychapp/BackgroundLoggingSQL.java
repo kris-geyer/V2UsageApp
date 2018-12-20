@@ -7,7 +7,6 @@ import net.sqlcipher.database.SQLiteOpenHelper;
 
 public class BackgroundLoggingSQL extends SQLiteOpenHelper {
 
-
     private static BackgroundLoggingSQL instance;
     private static final int DATABASE_VERSION = 1;
     private static final String DATABASE_NAME = "backgroundLogger.db",
