@@ -25,7 +25,9 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -102,128 +104,186 @@ public class RetrospectivelyLogData extends AsyncTask<Object, Integer, Integer> 
     private LinkedHashMap<Integer, HashMap<Long, String>> recordUsageStatistics() {
 
         List<UsageStats> appStatistics;
+        Map<String, UsageStats> appStatisticsNew;
         int dataPoint = 0;
-        //get current time
-        Calendar calendar = Calendar.getInstance();
-        //Manipulate it to when to start from
-        calendar.add(Calendar.DAY_OF_YEAR, -NUMBER_OF_DAYS_BACK_TO_MEASURE_DURATION_OF_USE);
-        startDate = calendar.getTimeInMillis();
+
+        //set calendar to the beginning of when the usage is intended to be monitored
+        Calendar calendar = initializeCalendar();
 
         //initialize what will contain the app Usage
-        LinkedHashMap<Integer, HashMap<Long, String>> orderedAppUsage= new LinkedHashMap<>();
+        LinkedHashMap<Integer, HashMap<Long, String>> orderedAppUsage = new LinkedHashMap<>();
+
         //start loop, so that if the start of the bin is in the future then stop documenting the usage
         if (usm != null) {
 
-            Calendar exampleDataMeh = Calendar.getInstance();
-            exampleDataMeh.setTimeInMillis(calendar.getTimeInMillis());
-            Log.i(TAG, "CHANGE OF DATE " + returnDayOfWeek(exampleDataMeh.get(Calendar.DAY_OF_WEEK)));
+            int dayCount = 0;
+            final long currentTime = System.currentTimeMillis();
+            final long thisTimeTomorrow = currentTime + (86400 * 1000);
+            while (calendar.getTimeInMillis() < thisTimeTomorrow) {
 
-        while(calendar.getTimeInMillis() < System.currentTimeMillis()){
+                calendar = makeMorning(calendar);
+                long startOfDay = calendar.getTimeInMillis();
+                String currentDayOFWeek = returnDayOfWeek(calendar.get(Calendar.DAY_OF_WEEK));
 
-            calendar.add(Calendar.DAY_OF_YEAR, DURATION_OF_BINS_OF_DURATION_IN_DAYS);
+                calendar = makeEvening(calendar);
 
-            //Return the millisecond of the end of the day
-            calendar.set(Calendar.HOUR_OF_DAY, 6);
-            calendar.set(Calendar.MINUTE, 59);
-            calendar.set(Calendar.SECOND, 59);
-            calendar.set(Calendar.MILLISECOND, 999);
+                long endOfDay = calendar.getTimeInMillis();
+                String stillCurrentDayOFWeek = returnDayOfWeek(calendar.get(Calendar.DAY_OF_WEEK));
 
-            //document the end of the bracket
-            long endOfBin = calendar.getTimeInMillis();
-
-            //Return the millisecond to start from
-            calendar.set(Calendar.HOUR_OF_DAY, 7);
-            calendar.set(Calendar.MINUTE, 0);
-            calendar.set(Calendar.SECOND, 0);
-            calendar.set(Calendar.MILLISECOND, 0);
-
-            long startOfBin = calendar.getTimeInMillis();
-
-            long totalUsage = 0;
-
-                //if the end of the bracket if in the future then change it to the current
-                if (endOfBin < System.currentTimeMillis()) {
-                    appStatistics = usm.queryUsageStats(UsageStatsManager.INTERVAL_BEST, startOfBin, (startOfBin + (86400000-1)));
-                } else {
-                    appStatistics = usm.queryUsageStats(UsageStatsManager.INTERVAL_BEST, startOfBin, System.currentTimeMillis());
+                calendar.add(Calendar.DAY_OF_YEAR, 1);
+                if (endOfDay > currentTime) {
+                    endOfDay = currentTime;
                 }
+
+                documentDay(startOfDay, currentDayOFWeek, endOfDay, stillCurrentDayOFWeek, ++dayCount);
+
+                long totalUsage = 0;
+
+                //appStatistics = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startOfDay, endOfDay);
+
+                appStatisticsNew = usm.queryAndAggregateUsageStats(startOfDay, endOfDay);
+
+
+                if(appStatisticsNew != null && appStatisticsNew.size() >0){
+                    Iterator appStatisticsEntry = appStatisticsNew.entrySet().iterator();
+
+                    while (appStatisticsEntry.hasNext()) {
+                        Map.Entry pair = (Map.Entry) appStatisticsEntry.next();
+                        UsageStats appUsageStat = (UsageStats) pair.getValue();
+                        long timeAppWasInForeground  = appUsageStat.getTotalTimeInForeground();
+                        totalUsage += timeAppWasInForeground;
+                        if (appUsageStat.getFirstTimeStamp() < startDate) {
+                            startDate = appUsageStat.getFirstTimeStamp();
+                        }
+                        appStatisticsEntry.remove();
+                    }
+
+
+                    HashMap<Long, String> dateHashMap = new HashMap<>();
+                    dateHashMap.put(totalUsage, startOfDay + " - " + endOfDay);
+                    orderedAppUsage.put(++dataPoint, dateHashMap);
+
+                    appStatisticsNew = usm.queryAndAggregateUsageStats(startOfDay, endOfDay);
+
+                    Iterator secondAppStatisticsEntry = appStatisticsNew.entrySet().iterator();
+
+                    while (secondAppStatisticsEntry.hasNext()) {
+
+                        Map.Entry pair = (Map.Entry) secondAppStatisticsEntry.next();
+                        UsageStats appUsageStat = (UsageStats) pair.getValue();
+                        long timeAppWasInForeground  = appUsageStat.getTotalTimeInForeground();
+                        String appUsed = (String) pair.getKey();
+                        HashMap<Long, String> hashMapToEnter = new HashMap<>();
+                        Log.i("record", "app: " + appUsed + " time: " + timeAppWasInForeground);
+
+                        hashMapToEnter.put(timeAppWasInForeground, appUsed);
+                        orderedAppUsage.put(++dataPoint, hashMapToEnter);
+
+                        secondAppStatisticsEntry.remove();
+                    }
+
+
+                }
+
+
+                /*
                 //if apps aren't null
-                if(appStatistics != null && appStatistics.size() > 0){
+                if (appStatistics != null && appStatistics.size() > 0) {
                     //set the total usage to null
 
                     //for each documented stats in the stats
+                    HashMap<Long, String> appUsage = new HashMap<>();
+                    for (UsageStats usageStats : appStatistics) {
 
-                    for(UsageStats usageStats : appStatistics){
+                        long timeInForeground = usageStats.getTotalTimeInForeground() / 1000;
                         //add the time that the analysed app was in the foreground to the int totalUsage
-                        totalUsage+=usageStats.getTotalTimeInForeground()/1000;
+                        totalUsage += timeInForeground;
                         ////put the app usage
-                        HashMap<Long, String> appUsage = new HashMap<>();
-                        appUsage.put((usageStats.getTotalTimeInForeground()/1000), usageStats.getPackageName());
+
+                        appUsage.put(timeInForeground, usageStats.getPackageName());
                         Log.i(TAG, "APP: " + usageStats.getPackageName());
-                        orderedAppUsage.put(dataPoint++, appUsage);
-                        if(usageStats.getFirstTimeStamp() < startDate){
+
+                        if (usageStats.getFirstTimeStamp() < startDate) {
                             startDate = usageStats.getFirstTimeStamp();
                         }
                     }
+                    */
+                    /**
+                     * Generate a method for listing the values in order of duration employed
+                     */
+                    /*
+                    HashMap<Long, String> dateHashMap = new HashMap<>();
+                    dateHashMap.put(totalUsage, startOfDay + " - " + endOfDay);
+                    orderedAppUsage.put(++dataPoint, dateHashMap);
 
+                    Iterator it = appUsage.entrySet().iterator();
+                    while (it.hasNext()) {
+                        Map.Entry pair = (Map.Entry) it.next();
+                        HashMap<Long, String> toEnter = new HashMap<>();
+                        toEnter.put((Long) pair.getKey(), (String) pair.getValue());
+                        orderedAppUsage.put(++dataPoint, toEnter);
+                        it.remove();
+                    }
+                    */
                 }
-
-
-            //store the value for when the logging occurs from
-            startDate = startOfBin;
-            //move the startFrom to the end of the bracket
-            //document when the start of the bin is.
-
-            if(endOfBin<System.currentTimeMillis()) {
-                HashMap<Long, String> appUsage = new HashMap<>();
-
-                Calendar exampleData = Calendar.getInstance();
-                exampleData.setTimeInMillis(startOfBin);
-                Log.i(TAG, "APP: CHANGE OF DATE " + returnDayOfWeek(exampleData.get(Calendar.DAY_OF_WEEK)));
-
-                appUsage.put(totalUsage, returnDayOfWeek(exampleData.get(Calendar.DAY_OF_WEEK)) + " - " + endOfBin);
-
-                orderedAppUsage.put(dataPoint++, appUsage);
-            }else{
-                HashMap<Long, String> appUsage = new HashMap<>();
-
-                orderedAppUsage.put(dataPoint++, appUsage);
-
-                Calendar exampleData = Calendar.getInstance();
-                exampleData.setTimeInMillis(startOfBin);
-                Log.i(TAG, "CHANGE OF DATE " + returnDayOfWeek(exampleData.get(Calendar.DAY_OF_WEEK)));
-                appUsage.put(totalUsage, returnDayOfWeek(exampleData.get(Calendar.DAY_OF_WEEK)) + " - " + System.currentTimeMillis());
+                return orderedAppUsage;
             }
-
-
-            }
-            Log.i("start date", "" + startDate);
-
             return orderedAppUsage;
         }
 
-        return orderedAppUsage;
+
+    private Calendar initializeCalendar() {
+        Calendar calendar = Calendar.getInstance();
+        calendar.add(Calendar.DAY_OF_YEAR, -NUMBER_OF_DAYS_BACK_TO_MEASURE_DURATION_OF_USE);
+
+        Log.i("initialize", ""+calendar.getTimeInMillis());
+
+        return calendar;
     }
 
+    /**
+     * No idea why this is the sums required to access midnight and the end of the day, but that's what android wants.
+     * @param calendar
+     * @return
+     */
+    private Calendar makeMorning(Calendar calendar){
+        calendar.set(Calendar.HOUR, -12);
+        calendar.set(Calendar.MINUTE, 0);
+        calendar.set(Calendar.SECOND, 0);
+        calendar.set(Calendar.MILLISECOND, 0);
+        return calendar;
+    }
 
-    private String returnDayOfWeek(int day){
-        switch (day){
-            case Calendar.MONDAY:
-                return "MONDAY";
-            case Calendar.TUESDAY:
-                return  "TUESDAY";
-            case Calendar.WEDNESDAY:
-                return "WEDNESDAY";
-            case Calendar.THURSDAY:
-                return "THURSDAY";
-            case Calendar.FRIDAY:
-                return "FRIDAY";
-            case Calendar.SATURDAY:
-                return "SATURDAY";
+    private Calendar makeEvening(Calendar calendar){
+        calendar.set(Calendar.HOUR, 23);
+        calendar.set(Calendar.MINUTE, 59);
+        calendar.set(Calendar.SECOND, 59);
+        calendar.set(Calendar.MILLISECOND, 0);
+        return calendar;
+    }
+
+    private void documentDay(long startOfDay, String currentDayOfWeek, long endOfDay, String stillCurrentdayOfWeek, int dayCount) {
+        Log.i("day: " + dayCount, "start of" + currentDayOfWeek + ": " + startOfDay + " end of "+stillCurrentdayOfWeek +": " + endOfDay + " difference: " + (endOfDay-startOfDay));
+    }
+
+    private String returnDayOfWeek (int dayInt){
+        switch (dayInt){
             case Calendar.SUNDAY:
-                return "SUNDAY";
+                return "Sunday";
+            case Calendar.MONDAY:
+                return "Monday";
+            case Calendar.TUESDAY:
+                return "Tuesday";
+            case Calendar.WEDNESDAY:
+                return "Wednesday";
+            case Calendar.THURSDAY:
+                return "Thursday";
+            case Calendar.FRIDAY:
+                return "Friday";
+            case Calendar.SATURDAY:
+                return "Saturday";
             default:
-                return "OTHER";
+                return "Error";
         }
     }
 

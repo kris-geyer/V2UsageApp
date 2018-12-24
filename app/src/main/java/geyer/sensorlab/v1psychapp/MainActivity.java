@@ -31,6 +31,12 @@ import net.sqlcipher.database.SQLiteDatabase;
 import java.io.File;
 import java.util.ArrayList;
 
+
+/**
+ * I would like to take this opportunity to thank my parents.
+ * Without their belief and support then I would have never made this
+ */
+
 public class MainActivity extends AppCompatActivity implements View.OnClickListener, asyncResponse {
 
     PermissionRequestsAndCrossSectionalAnalysis prANDcsa;
